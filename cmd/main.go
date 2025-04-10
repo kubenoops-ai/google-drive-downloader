@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/kubenoops-ai/google-drive-downloader/pkg/drive"
+	"github.com/kubenoops-ai/google-drive-downloader/pkg/transform"
 	"github.com/kubenoops-ai/google-drive-downloader/pkg/utils"
 )
 
@@ -19,6 +21,8 @@ func main() {
 		outputDir   string
 		verbose     bool
 		maxResults  int
+		pathPattern string
+		pathFormat  string
 	)
 
 	flag.StringVar(&credentials, "credentials", "credentials.json", "Path to credentials file")
@@ -29,6 +33,8 @@ func main() {
 	flag.StringVar(&outputDir, "output-dir", "output", "Directory to save downloaded files")
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose logging")
 	flag.IntVar(&maxResults, "max", 0, "Maximum number of files to return (0 for unlimited)")
+	flag.StringVar(&pathPattern, "path-pattern", "", "Regex pattern with named groups to transform output paths (e.g. 'Zoom Recordings/(?P<date>[^/]+)/.*\\.TRANSCRIPT')")
+	flag.StringVar(&pathFormat, "path-format", "", "Format string for transformed paths using named groups (e.g. '${date}.TRANSCRIPT')")
 
 	flag.Parse()
 
@@ -36,6 +42,23 @@ func main() {
 		fmt.Println("Error: pattern is required")
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	// Validate path transformation flags
+	if (pathPattern == "") != (pathFormat == "") {
+		fmt.Println("Error: both path-pattern and path-format must be provided together")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	var pathTransformer *transform.PathTransformer
+	if pathPattern != "" {
+		var err error
+		pathTransformer, err = transform.NewPathTransformer(pathPattern, pathFormat)
+		if err != nil {
+			fmt.Printf("Error creating path transformer: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	config := utils.Config{
@@ -66,8 +89,49 @@ func main() {
 	}
 
 	if config.DryRun {
+		fmt.Println("\nFound files:")
+		for _, file := range files {
+			fmt.Printf("- %s (Modified: %s)\n", file.Path, file.ModifiedTime)
+		}
+
+		fmt.Println("\nDownload preview:")
+		for _, file := range files {
+			fmt.Printf("\n📄 Original file: %s\n", file.Path)
+			if pathTransformer != nil {
+				fmt.Printf("   🔍 Applying pattern: %q\n", pathPattern)
+				fmt.Printf("   📝 Using format: %q\n", pathFormat)
+				newPath, err := pathTransformer.Transform(file.Path)
+				if err != nil {
+					fmt.Printf("   ❌ Transformation failed: %v\n", err)
+					fmt.Printf("   📁 Will be saved as: %s\n", filepath.Join(config.OutputDir, file.Path))
+				} else {
+					fmt.Printf("   ✅ Transformed to: %q\n", newPath)
+					fmt.Printf("   📁 Will be saved as: %s\n", filepath.Join(config.OutputDir, newPath))
+				}
+			} else {
+				fmt.Printf("   📁 Will be saved as: %s\n", filepath.Join(config.OutputDir, file.Path))
+			}
+		}
 		fmt.Println("\nDry run completed. No files were downloaded.")
 		return
+	}
+
+	if pathTransformer != nil {
+		fmt.Println("\nTransforming file paths before downloading:")
+		// Transform file paths before downloading
+		for i := range files {
+			fmt.Printf("\n🔍 Processing file %d/%d:\n", i+1, len(files))
+			fmt.Printf("   Input path: %q\n", files[i].Path)
+			fmt.Printf("   Using pattern: %q\n", pathPattern)
+			fmt.Printf("   Using format: %q\n", pathFormat)
+			newPath, err := pathTransformer.Transform(files[i].Path)
+			if err != nil {
+				fmt.Printf("   ❌ Warning: Could not transform path: %v\n", err)
+				continue
+			}
+			fmt.Printf("   ✅ Successfully transformed to: %q\n", newPath)
+			files[i].Path = newPath
+		}
 	}
 
 	if err := driveService.DownloadFiles(files, config.OutputDir); err != nil {

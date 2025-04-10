@@ -235,7 +235,15 @@ func (d *DriveService) listFilesRecursive(folderID, parentPath string, pattern *
 func (d *DriveService) DownloadFile(fileInfo FileInfo, outputDir string) error {
 	d.log("📥 Starting download of: %s", fileInfo.Path)
 
-	outPath := filepath.Join(outputDir, fileInfo.Path)
+	// If the path contains a directory separator, use filepath.Join
+	// Otherwise, just use the path as is
+	var outPath string
+	if strings.Contains(fileInfo.Path, string(os.PathSeparator)) {
+		outPath = filepath.Join(outputDir, fileInfo.Path)
+	} else {
+		outPath = filepath.Join(outputDir, fileInfo.Path)
+	}
+
 	d.log("  Creating directory: %s", filepath.Dir(outPath))
 	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
 		return fmt.Errorf("unable to create output directory: %v", err)

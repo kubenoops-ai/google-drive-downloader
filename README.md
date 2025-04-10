@@ -12,6 +12,7 @@ A command-line tool for searching and downloading files from Google Drive with s
 - 🏃 Dry-run mode for testing
 - 📝 Verbose logging option
 - 📂 Maintains folder structure when downloading
+- 🔀 Path transformation using regex capture groups
 
 ## Prerequisites
 
@@ -47,6 +48,8 @@ go build -o google-drive-downloader cmd/main.go
 - `-dry-run`: Only list files without downloading
 - `-output-dir`: Directory to save downloaded files (default: "output")
 - `-verbose`: Enable verbose logging
+- `-path-pattern`: Regex pattern with named capture groups for path transformation
+- `-path-format`: Output format string using captured variables from path-pattern
 
 ### Examples
 
@@ -65,6 +68,27 @@ go build -o google-drive-downloader cmd/main.go
 ./google-drive-downloader -pattern ".*\.docx$" -output-dir "downloads" -verbose
 ```
 
+4. Transform paths to include date and room from folder name:
+```bash
+./google-drive-downloader -pattern ".*\.TRANSCRIPT$" \
+  --path-pattern "(?P<date>[^-]+-[^-]+-[^-]+-[^-]+-[^-]+-[^-]+)-(?P<room>[^/]+)/.*\.TRANSCRIPT$" \
+  --path-format '${date}-${room}.TRANSCRIPT'
+```
+
+5. Extract date components into a formatted filename:
+```bash
+./google-drive-downloader -pattern ".*\.TRANSCRIPT$" \
+  --path-pattern "(?P<month>[^-]+)-(?P<day>[^-]+)-(?P<year>[^-]+)-(?P<hour>[^-]+)-(?P<minute>[^-]+)-(?P<second>[^-]+)-.*" \
+  --path-format '${year}-${month}-${day}_${hour}-${minute}.TRANSCRIPT'
+```
+
+6. Keep only the room name in the output filename:
+```bash
+./google-drive-downloader -pattern ".*\.TRANSCRIPT$" \
+  --path-pattern ".*-(?P<room>AI_[^/]+)/.*\.TRANSCRIPT$" \
+  --path-format '${room}.TRANSCRIPT'
+```
+
 ## Output Structure
 
 Downloaded files maintain their Google Drive folder structure:
@@ -78,8 +102,21 @@ output/
 ## Authentication
 
 1. Create a Google Cloud project and enable the Google Drive API
-2. Create credentials (OAuth 2.0 Client ID) and download as `credentials.json`
-3. Place `credentials.json` in the same directory as the binary or specify its path using `-credentials`
+2. Create a service account:
+   - Go to "IAM & Admin" > "Service Accounts"
+   - Click "Create Service Account"
+   - Fill in the service account details
+   - No need to grant any roles (permissions will be handled in Google Drive)
+3. Create and download the service account key:
+   - Select your service account
+   - Go to "Keys" tab
+   - Add Key > Create new key > JSON
+   - Save the downloaded JSON file as `credentials.json`
+4. Share your Google Drive folders:
+   - Copy the service account email (ends with `@...iam.gserviceaccount.com`)
+   - Share your Google Drive folders with this email address
+   - Grant at least "Viewer" access
+5. Place `credentials.json` in the same directory as the binary or specify its path using `-credentials`
 
 ## Notes
 
@@ -88,6 +125,58 @@ output/
 - When using `-max`, files are sorted by modification date (newest first) before limiting
 - Use `-dry-run` to preview which files would be downloaded
 - The `-verbose` flag provides detailed logging of the search and download process
+
+## Path Transformations
+
+The tool supports transforming output file paths using regex capture groups. This is useful for:
+- Extracting date/time components from folder names
+- Simplifying complex folder structures
+- Organizing files by captured metadata
+- Standardizing file naming conventions
+
+### Path Transformation Format
+
+1. Use `-path-pattern` to define a regex with named capture groups:
+   - Named groups use the format `(?P<name>pattern)`
+   - Example: `(?P<date>[^-]+)-(?P<type>[^/]+)`
+
+2. Use `-path-format` to define the output format:
+   - Reference captured groups with `${name}`
+   - Example: `${date}_${type}.txt`
+
+### Important Notes
+
+- Quotes in path format strings:
+  - Always use single quotes (`'`) around the path format to prevent shell expansion of `${variables}`
+  - Using double quotes (`"`) will cause the shell to try to expand the variables before passing to the program
+- The path pattern must match the entire path you want to transform
+- All capture groups referenced in the format must exist in the pattern
+- Use the `-dry-run` flag to test path transformations before downloading
+
+### Example Transformations
+
+Input path: `2025-04-10-17-27-28-AI_TEAM_OFFICE_ROOM-2/audio_transcript.TRANSCRIPT`
+
+1. Basic date extraction:
+```
+Pattern: (?P<date>[^-]+-[^-]+-[^-]+)-.*\.TRANSCRIPT$
+Format: ${date}.TRANSCRIPT
+Output: 2025-04-10.TRANSCRIPT
+```
+
+2. Date and type combination:
+```
+Pattern: (?P<date>[^-]+-[^-]+-[^-]+)-.*?/(?P<type>[^_]+)_.*\.TRANSCRIPT$
+Format: ${date}_${type}.TRANSCRIPT
+Output: 2025-04-10_audio.TRANSCRIPT
+```
+
+3. Complex date formatting:
+```
+Pattern: (?P<year>[^-]+)-(?P<month>[^-]+)-(?P<day>[^-]+)-(?P<time>[^-]+-[^-]+-[^-]+)-.*
+Format: ${year}/${month}/${day}/${time}.TRANSCRIPT
+Output: 2025/04/10/17-27-28.TRANSCRIPT
+```
 
 ## License
 
